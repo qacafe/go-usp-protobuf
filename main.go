@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -30,6 +31,12 @@ func main() {
 
 	flag.Parse()
 
+	if !*encodeMsg && !*encodeRecord &&
+		!*decodeMsg && !*decodeRecord {
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	if *encodeMsg || *encodeRecord {
 		dec := json.NewDecoder(os.Stdin)
 		u := jsonpb.Unmarshaler{
@@ -54,10 +61,10 @@ func main() {
 			log.Fatal("marshaling error: ", err)
 		}
 
-		fmt.Fprintln(os.Stdout, hex.EncodeToString(buf))
-	}
-
-	if *decodeMsg || *decodeRecord {
+		str := hex.EncodeToString(buf)
+		fmt.Fprintln(os.Stdout, str)
+		fmt.Fprintln(os.Stdout, base64.StdEncoding.EncodeToString([]byte(str)))
+	} else if *decodeMsg || *decodeRecord {
 		// read USP Record hex string from stdin
 		r := bufio.NewReader(os.Stdin)
 		line, err := r.ReadString('\n')
@@ -70,12 +77,18 @@ func main() {
 			log.Fatal("decode error: ", err)
 		}
 
-		var pb proto.Message
+		var (
+			pb     proto.Message
+			msg    *usp.Msg
+			record *usp_record.Record
+		)
 
 		if *decodeMsg {
-			pb = &usp.Msg{}
+			msg = &usp.Msg{}
+			pb = msg
 		} else {
-			pb = &usp_record.Record{}
+			record = &usp_record.Record{}
+			pb = record
 		}
 
 		// decode USP Record protobuf wire format
@@ -96,5 +109,17 @@ func main() {
 			log.Fatal("marshaling error: ", err)
 		}
 		fmt.Fprintf(os.Stdout, "\n")
+		if *decodeMsg {
+			fmt.Fprintln(os.Stdout, base64.StdEncoding.EncodeToString([]byte(line)))
+		} else if *decodeRecord {
+			if nsc, ok := record.RecordType.(*usp_record.Record_NoSessionContext); ok {
+				fmt.Fprintln(os.Stdout, hex.EncodeToString(nsc.NoSessionContext.GetPayload()))
+			}
+			if sc, ok := record.RecordType.(*usp_record.Record_SessionContext); ok {
+				for _, payload := range sc.SessionContext.GetPayload() {
+					fmt.Fprintln(os.Stdout, hex.EncodeToString(payload))
+				}
+			}
+		}
 	}
 }
